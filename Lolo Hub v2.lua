@@ -1,0 +1,1 @@
+﻿loadstring(game:HttpGet("https://raw.githubusercontent.com/loris05nav-byte/Script-Roblox05/refs/heads/main/Lolo%20Hub%20v2.lua?token=GHSAT0AAAAAADROUFKPGKCDIKVHM3QFW5GU2KDUTCA"))()
