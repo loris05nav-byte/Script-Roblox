@@ -1,11 +1,9 @@
 --[[ 
-    ULTIMATE ADMIN PANEL v7.0 (FULL VERSION & PREMIUM UI)
-    - Système de Bulle Déplaçable : Bouton "-" ajouté + Touche G + Animation (Nouveau)
-    - UI Moderne : Glassmorphism & Animations (Fixé)
-    - Système de TP : Fenêtre indépendante et stylisée (Fixé)
-    - Fly : Statique (Z,Q,S,D / Mobile Touch) (Conservé)
-    - NoClip : Désactivation instantanée (Conservé)
-    - Fonctionnalités : Dash, ESP, GodMode, Aimbot, XRay, Zoom, Bright. (Toutes conservées)
+    ULTIMATE ADMIN PANEL v8.0 (SPECTATE EDITION)
+    - Système de Bulle Déplaçable : Bouton "-" ajouté + Touche G + Animation (Conservé)
+    - Système de TP : Fenêtre indépendante (Conservé)
+    - Système de Spectate : Nouvelle fenêtre indépendante (Nouveau)
+    - Fonctions Core : Fly, NoClip, Dash, ESP, GodMode, Aimbot, XRay, Zoom, Bright (Conservées)
 ]]
 
 local Players = game:GetService("Players")
@@ -42,7 +40,7 @@ local GUI_THEME = {
     Transparency = 0.1 -- Effet Glass
 }
 
-local sizes = isMobile and {w = 240, h = 340, head = 40, btn = 35, txt = 11} or {w = 380, h = 520, head = 60, btn = 45, txt = 14}
+local sizes = isMobile and {w = 240, h = 340, head = 40, btn = 35, txt = 11} or {w = 380, h = 550, head = 60, btn = 45, txt = 14}
 
 -- --- FONCTIONS DE DRAG (GLISSER-DÉPOSER) ---
 local function makeDraggable(frame, handle)
@@ -69,7 +67,7 @@ end
 
 -- --- GUI BASE ---
 local screenGui = Instance.new("ScreenGui", player.PlayerGui)
-screenGui.Name = "UltimateAdmin_v70"
+screenGui.Name = "UltimateAdmin_v80"
 screenGui.ResetOnSpawn = false
 
 -- Bulle Flottante (Minimized)
@@ -112,7 +110,6 @@ header.BackgroundColor3 = GUI_THEME.Header
 header.BackgroundTransparency = GUI_THEME.Transparency
 Instance.new("UICorner", header).CornerRadius = UDim.new(0, 15)
 
--- Pour éviter que les coins arrondis en bas du header ne se voient
 local headerBottom = Instance.new("Frame", header)
 headerBottom.Size = UDim2.new(1, 0, 0, 10)
 headerBottom.Position = UDim2.new(0, 0, 1, -10)
@@ -126,7 +123,7 @@ icon.TextColor3 = GUI_THEME.Accent; icon.BackgroundTransparency = 1
 icon.Font = Enum.Font.GothamBold; icon.TextSize = sizes.txt + 6
 
 local title = Instance.new("TextLabel", header)
-title.Text = "ULTIMATE ADMIN v7.0"
+title.Text = "ULTIMATE ADMIN v8.0"
 title.Size = UDim2.new(1, -90, 1, 0); title.Position = UDim2.new(0, 50, 0, 0)
 title.TextColor3 = GUI_THEME.Text; title.BackgroundTransparency = 1
 title.Font = Enum.Font.GothamBold; title.TextSize = sizes.txt + 2
@@ -174,25 +171,21 @@ local function toggleUI()
         tween.Completed:Connect(function()
             main.Visible = false
             bubble.Visible = true
-            -- Placement dynamique de la bulle à l'endroit du menu
             bubble.Position = UDim2.new(0, main.AbsolutePosition.X + (sizes.w/2) - 25, 0, main.AbsolutePosition.Y + (sizes.head/2) - 10)
             isAnimating = false
         end)
     end
 end
 
--- Raccourci G
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if not gameProcessed and input.KeyCode == Enum.KeyCode.G then
         toggleUI()
     end
 end)
 
--- Clic sur la bulle et le bouton réduire
 bubble.MouseButton1Click:Connect(function() toggleUI() end)
 minBtn.MouseButton1Click:Connect(function() toggleUI() end)
 
--- Rendre la fenêtre principale et la bulle déplaçables
 makeDraggable(main, header)
 makeDraggable(bubble, bubble)
 
@@ -379,7 +372,6 @@ tpScr.ScrollBarThickness = 2
 local tpLayout = Instance.new("UIListLayout", tpScr)
 tpLayout.Padding = UDim.new(0, 5)
 
--- Rendre la fenêtre de TP déplaçable
 makeDraggable(tpWin, tpHeader)
 
 addToggle("12. 👥 TP VERS JOUEUR ▼", function(active)
@@ -403,10 +395,77 @@ addToggle("12. 👥 TP VERS JOUEUR ▼", function(active)
     end
 end)
 
+-- --- SYSTÈME SPECTATE JOUEUR (NOUVELLE FENÊTRE) ---
+local specWin = Instance.new("Frame", screenGui)
+specWin.Size = UDim2.new(0, 200, 0, 250)
+-- Placé à gauche du panel principal
+specWin.Position = UDim2.new(0.5, -sizes.w/2 - 220, 0.5, -125)
+specWin.BackgroundColor3 = GUI_THEME.Background
+specWin.BackgroundTransparency = GUI_THEME.Transparency
+specWin.Visible = false
+Instance.new("UICorner", specWin).CornerRadius = UDim.new(0, 10)
+Instance.new("UIStroke", specWin).Color = GUI_THEME.Accent
+Instance.new("UIStroke", specWin).Transparency = 0.3
+
+local specHeader = Instance.new("Frame", specWin)
+specHeader.Size = UDim2.new(1, 0, 0, 30)
+specHeader.BackgroundColor3 = GUI_THEME.Header
+Instance.new("UICorner", specHeader).CornerRadius = UDim.new(0, 10)
+local specTitle = Instance.new("TextLabel", specHeader)
+specTitle.Size = UDim2.new(1, 0, 1, 0)
+specTitle.BackgroundTransparency = 1
+specTitle.Text = "SPECTATE"
+specTitle.TextColor3 = GUI_THEME.Accent
+specTitle.Font = Enum.Font.GothamBold
+
+local specScr = Instance.new("ScrollingFrame", specWin)
+specScr.Size = UDim2.new(1, -10, 1, -40); specScr.Position = UDim2.new(0, 5, 0, 35)
+specScr.BackgroundTransparency = 1; specScr.AutomaticCanvasSize = Enum.AutomaticSize.Y
+specScr.ScrollBarThickness = 2
+local specLayout = Instance.new("UIListLayout", specScr)
+specLayout.Padding = UDim.new(0, 5)
+
+makeDraggable(specWin, specHeader)
+
+addToggle("13. 👁️ SPECTATE JOUEUR ▼", function(active)
+    specWin.Visible = active
+    if specWin.Visible then
+        for _, v in pairs(specScr:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
+        
+        -- Bouton pour arrêter de Spectate et revenir au joueur
+        local stopBtn = Instance.new("TextButton", specScr)
+        stopBtn.Size = UDim2.new(1, 0, 0, 30); stopBtn.Text = "❌ STOP SPECTATE"
+        stopBtn.BackgroundColor3 = Color3.fromRGB(150, 40, 40); stopBtn.TextColor3 = Color3.new(1, 1, 1)
+        stopBtn.Font = Enum.Font.GothamBold
+        Instance.new("UICorner", stopBtn).CornerRadius = UDim.new(0, 5)
+        stopBtn.MouseButton1Click:Connect(function() 
+            if getHum() then camera.CameraSubject = getHum() end
+        end)
+
+        for _, p in pairs(Players:GetPlayers()) do
+            if p ~= player then
+                local pb = Instance.new("TextButton", specScr)
+                pb.Size = UDim2.new(1, 0, 0, 30); pb.Text = p.DisplayName
+                pb.BackgroundColor3 = GUI_THEME.ButtonOff; pb.TextColor3 = GUI_THEME.Text
+                pb.Font = Enum.Font.Gotham
+                Instance.new("UICorner", pb).CornerRadius = UDim.new(0, 5)
+                pb.MouseButton1Click:Connect(function() 
+                    if p.Character and p.Character:FindFirstChild("Humanoid") then 
+                        camera.CameraSubject = p.Character.Humanoid
+                    end 
+                end)
+            end
+        end
+    else
+        -- Sécurité : si on ferme la fenêtre, on recentre la caméra sur nous
+        if getHum() then camera.CameraSubject = getHum() end
+    end
+end)
+
 -- --- NOTIFICATION DE LANCEMENT ---
 game:GetService("StarterGui"):SetCore("SendNotification", {
-    Title = "ADMIN v7.0", 
+    Title = "ADMIN v8.0", 
     Text = "Panel chargé ! Touche [G] ou [-] pour réduire le menu.", 
     Duration = 5,
-    Icon = "rbxassetid://1087851214" -- Icône par défaut
+    Icon = "rbxassetid://1087851214"
 })
