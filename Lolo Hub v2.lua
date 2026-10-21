@@ -353,7 +353,7 @@ addToggle("6. God Mode", function(a)
     connections["God"] = RunService.Heartbeat:Connect(function() if states.godmode and getHum() then getHum().Health = 100 end end)
 end)
 
-addToggle("7. Vitesse Éclair", function(a) if getHum() then getHum().WalkSpeed = a and 400 or 16 end end)
+addToggle("7. Vitesse Éclair", function(a) if getHum() then getHum().WalkSpeed = a and 70 or 16 end end)
 
 addToggle("8. Saut Infini", function(a)
     states.infjump = a
