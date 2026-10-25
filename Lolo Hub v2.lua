@@ -24,11 +24,16 @@ local playerGui = player:WaitForChild("PlayerGui")
 -- --- ÉTATS & VARIABLES ---
 local states = {
     noclip = false, godmode = false, dash = false, fly = false,
-    esp = false, infjump = false, infzoom = false, xray = false, aimbot = false
+    esp = false, entitiesESP = false, infjump = false, infzoom = false, xray = false, aimbot = false
 }
 
 local connections = {}
 local xrayOriginals = {}
+local xrayConnection = nil
+local xrayAccumulator = 0
+local XRAY_RADIUS = 220       -- Ne traite que la zone autour du joueur
+local XRAY_MAX_PARTS = 450    -- Limite stricte pour éviter les cartes surchargées
+local XRAY_UPDATE_INTERVAL = 0.45
 local flyBV, flyBG = nil, nil
 
 local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
@@ -76,27 +81,71 @@ end
 loadFavs()
 
 -- --- FONCTIONS DE DRAG (GLISSER-DÉPOSER) ---
+-- Un seul suivi global évite d'empiler des connexions à chaque fenêtre.
+local activeDrag = nil
+local DRAG_THRESHOLD = 4
+
 local function makeDraggable(frame, handle)
-    local dragging, dragStart, startPos
-    
+    local dragState = { dragged = false }
+    handle.Active = true
+
     handle.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            dragStart = input.Position
-            startPos = frame.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
-            end)
+        local inputType = input.UserInputType
+        if inputType ~= Enum.UserInputType.MouseButton1 and inputType ~= Enum.UserInputType.Touch then
+            return
         end
+
+        dragState.dragged = false
+        activeDrag = {
+            frame = frame,
+            handle = handle,
+            input = input,
+            inputType = inputType,
+            startPointer = input.Position,
+            startAbsolute = frame.AbsolutePosition,
+            startSize = frame.AbsoluteSize,
+            state = dragState,
+        }
     end)
-    
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - dragStart
-            frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        end
-    end)
+
+    return dragState
 end
+
+UserInputService.InputChanged:Connect(function(input)
+    local drag = activeDrag
+    if not drag or not drag.frame or not drag.frame.Parent then return end
+
+    local isMouseMove = drag.inputType == Enum.UserInputType.MouseButton1
+        and input.UserInputType == Enum.UserInputType.MouseMovement
+    local isTouchMove = drag.inputType == Enum.UserInputType.Touch
+        and input.UserInputType == Enum.UserInputType.Touch
+        and input == drag.input
+    if not isMouseMove and not isTouchMove then return end
+
+    local delta = input.Position - drag.startPointer
+    if delta.Magnitude < DRAG_THRESHOLD and not drag.state.dragged then return end
+    drag.state.dragged = true
+
+    local viewport = (Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize) or Vector2.new(1920, 1080)
+    local frameSize = drag.frame.AbsoluteSize
+    local left = math.clamp(drag.startAbsolute.X + delta.X, 0, math.max(0, viewport.X - frameSize.X))
+    local top = math.clamp(drag.startAbsolute.Y + delta.Y, 0, math.max(0, viewport.Y - frameSize.Y))
+
+    -- AbsolutePosition est le coin supérieur gauche ; Position dépend de l'AnchorPoint.
+    local anchor = drag.frame.AnchorPoint
+    drag.frame.Position = UDim2.fromOffset(
+        left + frameSize.X * anchor.X,
+        top + frameSize.Y * anchor.Y
+    )
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    local drag = activeDrag
+    if not drag then return end
+    if input == drag.input or (drag.inputType == Enum.UserInputType.MouseButton1 and input.UserInputType == Enum.UserInputType.MouseButton1) then
+        activeDrag = nil
+    end
+end)
 
 -- --- GUI BASE ---
 local screenGui = Instance.new("ScreenGui", playerGui)
@@ -129,6 +178,12 @@ main.BackgroundTransparency = GUI_THEME.Transparency
 main.BorderSizePixel = 0
 main.Visible = true
 Instance.new("UICorner", main).CornerRadius = UDim.new(0, 15)
+local mainGradient = Instance.new("UIGradient", main)
+mainGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(22, 24, 34)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(12, 13, 19)),
+})
+mainGradient.Rotation = 90
 
 -- Glow Border
 local stroke = Instance.new("UIStroke", main)
@@ -142,6 +197,12 @@ header.Size = UDim2.new(1, 0, 0, sizes.head)
 header.BackgroundColor3 = GUI_THEME.Header
 header.BackgroundTransparency = GUI_THEME.Transparency
 Instance.new("UICorner", header).CornerRadius = UDim.new(0, 15)
+local headerGradient = Instance.new("UIGradient", header)
+headerGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(34, 43, 61)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(18, 22, 32)),
+})
+headerGradient.Rotation = 0
 
 local headerBottom = Instance.new("Frame", header)
 headerBottom.Size = UDim2.new(1, 0, 0, 10)
@@ -165,12 +226,93 @@ title.TextXAlignment = Enum.TextXAlignment.Left
 -- Bouton de réduction "-"
 local minBtn = Instance.new("TextButton", header)
 minBtn.Size = UDim2.new(0, 40, 1, 0)
-minBtn.Position = UDim2.new(1, -40, 0, 0)
+minBtn.Position = UDim2.new(1, -80, 0, 0)
 minBtn.BackgroundTransparency = 1
 minBtn.Text = "-"
 minBtn.TextColor3 = GUI_THEME.Text
 minBtn.Font = Enum.Font.GothamBold
 minBtn.TextSize = sizes.txt + 12
+
+-- Bouton de fermeture définitive (avec confirmation)
+local closeBtn = Instance.new("TextButton", header)
+closeBtn.Name = "CloseButton"
+closeBtn.Size = UDim2.new(0, 40, 1, 0)
+closeBtn.Position = UDim2.new(1, -40, 0, 0)
+closeBtn.BackgroundTransparency = 1
+closeBtn.Text = "×"
+closeBtn.TextColor3 = Color3.fromRGB(255, 95, 105)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = sizes.txt + 10
+closeBtn.AutoButtonColor = false
+closeBtn.MouseEnter:Connect(function() closeBtn.TextColor3 = Color3.fromRGB(255, 145, 150) end)
+closeBtn.MouseLeave:Connect(function() closeBtn.TextColor3 = Color3.fromRGB(255, 95, 105) end)
+
+-- Fenêtre de confirmation, cachée tant que l'utilisateur ne clique pas sur ×.
+local closeConfirm = Instance.new("Frame", screenGui)
+closeConfirm.Name = "CloseConfirmation"
+closeConfirm.AnchorPoint = Vector2.new(0.5, 0.5)
+closeConfirm.Position = UDim2.new(0.5, 0, 0.5, 0)
+closeConfirm.Size = UDim2.new(0, isMobile and 280 or 360, 0, 175)
+closeConfirm.BackgroundColor3 = Color3.fromRGB(20, 22, 31)
+closeConfirm.BorderSizePixel = 0
+closeConfirm.Visible = false
+closeConfirm.ZIndex = 50
+Instance.new("UICorner", closeConfirm).CornerRadius = UDim.new(0, 12)
+local confirmStroke = Instance.new("UIStroke", closeConfirm)
+confirmStroke.Color = Color3.fromRGB(255, 95, 105)
+confirmStroke.Thickness = 1.5
+
+local confirmTitle = Instance.new("TextLabel", closeConfirm)
+confirmTitle.BackgroundTransparency = 1
+confirmTitle.Position = UDim2.new(0, 14, 0, 12)
+confirmTitle.Size = UDim2.new(1, -28, 0, 30)
+confirmTitle.Font = Enum.Font.GothamBold
+confirmTitle.Text = "Fermer le panel ?"
+confirmTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+confirmTitle.TextSize = isMobile and 16 or 18
+confirmTitle.ZIndex = 51
+
+local confirmText = Instance.new("TextLabel", closeConfirm)
+confirmText.BackgroundTransparency = 1
+confirmText.Position = UDim2.new(0, 16, 0, 45)
+confirmText.Size = UDim2.new(1, -32, 0, 48)
+confirmText.Font = Enum.Font.Gotham
+confirmText.Text = "Le script va s'arrêter et ses effets seront annulés. Cette action est définitive pour cette session."
+confirmText.TextWrapped = true
+confirmText.TextColor3 = Color3.fromRGB(205, 210, 220)
+confirmText.TextSize = isMobile and 11 or 13
+confirmText.ZIndex = 51
+
+local cancelCloseBtn = Instance.new("TextButton", closeConfirm)
+cancelCloseBtn.Name = "CancelClose"
+cancelCloseBtn.Size = UDim2.new(0.43, 0, 0, 36)
+cancelCloseBtn.Position = UDim2.new(0.05, 0, 1, -48)
+cancelCloseBtn.BackgroundColor3 = Color3.fromRGB(55, 59, 72)
+cancelCloseBtn.Text = "Annuler"
+cancelCloseBtn.TextColor3 = Color3.new(1, 1, 1)
+cancelCloseBtn.Font = Enum.Font.GothamSemibold
+cancelCloseBtn.TextSize = isMobile and 12 or 14
+cancelCloseBtn.ZIndex = 51
+Instance.new("UICorner", cancelCloseBtn).CornerRadius = UDim.new(0, 7)
+
+local confirmCloseBtn = Instance.new("TextButton", closeConfirm)
+confirmCloseBtn.Name = "ConfirmClose"
+confirmCloseBtn.Size = UDim2.new(0.43, 0, 0, 36)
+confirmCloseBtn.Position = UDim2.new(0.52, 0, 1, -48)
+confirmCloseBtn.BackgroundColor3 = Color3.fromRGB(170, 45, 55)
+confirmCloseBtn.Text = "Fermer"
+confirmCloseBtn.TextColor3 = Color3.new(1, 1, 1)
+confirmCloseBtn.Font = Enum.Font.GothamBold
+confirmCloseBtn.TextSize = isMobile and 12 or 14
+confirmCloseBtn.ZIndex = 51
+Instance.new("UICorner", confirmCloseBtn).CornerRadius = UDim.new(0, 7)
+
+closeBtn.MouseButton1Click:Connect(function()
+    closeConfirm.Visible = true
+end)
+cancelCloseBtn.MouseButton1Click:Connect(function()
+    closeConfirm.Visible = false
+end)
 
 -- Scroll Container
 local scroll = Instance.new("ScrollingFrame", main)
@@ -216,11 +358,14 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
-bubble.MouseButton1Click:Connect(function() toggleUI() end)
-minBtn.MouseButton1Click:Connect(function() toggleUI() end)
-
 makeDraggable(main, header)
-makeDraggable(bubble, bubble)
+local bubbleDragState = makeDraggable(bubble, bubble)
+
+bubble.MouseButton1Click:Connect(function()
+    -- Un glissement de la bulle ne doit pas être interprété comme un clic d'ouverture.
+    if not bubbleDragState.dragged then toggleUI() end
+end)
+minBtn.MouseButton1Click:Connect(function() toggleUI() end)
 
 -- --- UTILS ---
 local function getChar() return player.Character end
@@ -292,7 +437,11 @@ local function addToggle(txt, cb)
     b.TextXAlignment = Enum.TextXAlignment.Left
     b.AutoButtonColor = false
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
-    
+    local buttonStroke = Instance.new("UIStroke", b)
+    buttonStroke.Color = GUI_THEME.Accent
+    buttonStroke.Thickness = 1
+    buttonStroke.Transparency = 0.88
+
     local statusIndicator = Instance.new("Frame", b)
     statusIndicator.Size = UDim2.new(0, 4, 0.6, 0)
     statusIndicator.Position = UDim2.new(1, -12, 0.2, 0)
@@ -300,10 +449,39 @@ local function addToggle(txt, cb)
     Instance.new("UICorner", statusIndicator).CornerRadius = UDim.new(1, 0)
 
     local active = false
+    local hovered = false
+
+    local function refreshToggleStyle()
+        local targetColor
+        if active then
+            targetColor = Color3.fromRGB(25, 60, 80)
+        elseif hovered then
+            targetColor = Color3.fromRGB(45, 50, 64)
+        else
+            targetColor = GUI_THEME.ButtonOff
+        end
+        TweenService:Create(b, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            BackgroundColor3 = targetColor
+        }):Play()
+        TweenService:Create(buttonStroke, TweenInfo.new(0.14), {
+            Transparency = (active or hovered) and 0.45 or 0.88
+        }):Play()
+        TweenService:Create(statusIndicator, TweenInfo.new(0.14), {
+            BackgroundColor3 = active and GUI_THEME.Accent or (hovered and Color3.fromRGB(100, 115, 135) or Color3.fromRGB(60, 60, 70))
+        }):Play()
+    end
+
+    b.MouseEnter:Connect(function()
+        hovered = true
+        refreshToggleStyle()
+    end)
+    b.MouseLeave:Connect(function()
+        hovered = false
+        refreshToggleStyle()
+    end)
     b.MouseButton1Click:Connect(function()
         active = not active
-        TweenService:Create(b, TweenInfo.new(0.2), {BackgroundColor3 = active and Color3.fromRGB(25, 60, 80) or GUI_THEME.ButtonOff}):Play()
-        TweenService:Create(statusIndicator, TweenInfo.new(0.2), {BackgroundColor3 = active and GUI_THEME.Accent or Color3.fromRGB(60, 60, 70)}):Play()
+        refreshToggleStyle()
         cb(active)
     end)
 end
@@ -360,10 +538,91 @@ addToggle("8. Saut Infini", function(a)
     connections["Jump"] = UserInputService.JumpRequest:Connect(function() if states.infjump and getHum() then getHum():ChangeState(3) end end)
 end)
 
-addToggle("9. X-Ray (Murs)", function(a)
-    for _,v in pairs(Workspace:GetDescendants()) do if v:IsA("BasePart") and not v.Parent:FindFirstChild("Humanoid") then
-        if a then xrayOriginals[v] = v.Transparency; v.Transparency = 0.5 else v.Transparency = xrayOriginals[v] or 0 end
-    end end
+-- X-Ray optimisé : aucun parcours de toute la map.
+-- Utilise une requête spatiale limitée autour du joueur et traite un nombre maximal de pièces.
+local function isCharacterPart(part)
+    local model = part:FindFirstAncestorOfClass("Model")
+    return model ~= nil and model:FindFirstChildOfClass("Humanoid") ~= nil
+end
+
+local function restoreXRayPart(part)
+    local original = xrayOriginals[part]
+    if original ~= nil then
+        if part and part.Parent then
+            part.LocalTransparencyModifier = original
+        end
+        xrayOriginals[part] = nil
+    end
+end
+
+local function stopXRay()
+    if xrayConnection then
+        xrayConnection:Disconnect()
+        xrayConnection = nil
+    end
+    for part, original in pairs(xrayOriginals) do
+        if part and part.Parent then
+            part.LocalTransparencyModifier = original
+        end
+        xrayOriginals[part] = nil
+    end
+    xrayAccumulator = 0
+    states.xray = false
+end
+
+local function updateXRay()
+    local root = getRoot()
+    if not root then return end
+
+    local overlap = OverlapParams.new()
+    overlap.FilterType = Enum.RaycastFilterType.Exclude
+    overlap.FilterDescendantsInstances = player.Character and {player.Character} or {}
+    overlap.MaxParts = XRAY_MAX_PARTS
+
+    local ok, nearbyParts = pcall(function()
+        return Workspace:GetPartBoundsInRadius(root.Position, XRAY_RADIUS, overlap)
+    end)
+    if not ok or not nearbyParts then return end
+
+    local currentlyNearby = {}
+    for _, part in ipairs(nearbyParts) do
+        if part:IsA("BasePart") and part.Parent and not isCharacterPart(part) then
+            currentlyNearby[part] = true
+            if xrayOriginals[part] == nil then
+                xrayOriginals[part] = part.LocalTransparencyModifier
+            end
+            part.LocalTransparencyModifier = math.max(xrayOriginals[part], 0.5)
+        end
+    end
+
+    -- Restaure les pièces sorties de la zone afin de limiter la mémoire et les effets visuels.
+    for part, original in pairs(xrayOriginals) do
+        if not currentlyNearby[part] then
+            restoreXRayPart(part)
+        end
+    end
+end
+
+addToggle("9. X-Ray (Zone optimisée)", function(a)
+    if not a then
+        stopXRay()
+        return
+    end
+
+    if xrayConnection then
+        xrayConnection:Disconnect()
+        xrayConnection = nil
+    end
+    states.xray = true
+    xrayAccumulator = XRAY_UPDATE_INTERVAL
+    xrayConnection = RunService.Heartbeat:Connect(function(dt)
+        if not states.xray then return end
+        xrayAccumulator += dt
+        if xrayAccumulator >= XRAY_UPDATE_INTERVAL then
+            xrayAccumulator = 0
+            updateXRay()
+        end
+    end)
 end)
 
 addToggle("10. Full Bright", function(a)
@@ -898,6 +1157,221 @@ addToggle("14. 🎵 BOOMBOX RELICSxyz ▼", function(active)
         bbSwitchPage(1)
     end
 end)
+
+
+-- --- ESP ENTITÉS (AJOUT INDÉPENDANT, SANS MODIFIER L'ESP JOUEURS) ---
+local entityESPObjects = {}
+local entityESPScanConnection = nil
+local entityESPAddedConnection = nil
+local entityESPRemovingConnection = nil
+
+local function isEntityModel(model)
+    if not model or not model:IsA("Model") then
+        return false
+    end
+
+    -- Ne pas afficher l'ESP sur les personnages des joueurs.
+    if Players:GetPlayerFromCharacter(model) then
+        return false
+    end
+
+    -- Critères d'identification : attribut explicite ou structure courante d'entité/NPC.
+    return model:GetAttribute("IsEntity") == true
+        or model:FindFirstChild("Entity") ~= nil
+        or model:FindFirstChildOfClass("Humanoid") ~= nil
+        or model:FindFirstChild("HumanoidRootPart") ~= nil
+end
+
+local function removeEntityESP(model)
+    local data = entityESPObjects[model]
+    if not data then
+        return
+    end
+
+    if data.highlight then data.highlight:Destroy() end
+    if data.billboard then data.billboard:Destroy() end
+    entityESPObjects[model] = nil
+end
+
+local function createEntityESP(model)
+    if not states.entitiesESP or entityESPObjects[model] or not isEntityModel(model) then
+        return
+    end
+
+    local adornee = model:FindFirstChild("HumanoidRootPart")
+        or model.PrimaryPart
+        or model:FindFirstChild("Head")
+        or model:FindFirstChildWhichIsA("BasePart", true)
+
+    if not adornee then
+        return
+    end
+
+    local highlight = Instance.new("Highlight")
+    highlight.Name = "AdminEntityESP_Highlight"
+    highlight.Adornee = model
+    highlight.FillColor = Color3.fromRGB(255, 45, 45)
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.FillTransparency = 0.82
+    highlight.OutlineTransparency = 0
+    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    highlight.Parent = screenGui
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "AdminEntityESP_Info"
+    billboard.Adornee = adornee
+    billboard.Size = UDim2.fromOffset(180, 42)
+    billboard.StudsOffset = Vector3.new(0, 3, 0)
+    billboard.AlwaysOnTop = true
+    billboard.MaxDistance = 10000
+    billboard.Parent = screenGui
+
+    local label = Instance.new("TextLabel")
+    label.Name = "Info"
+    label.Size = UDim2.fromScale(1, 1)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Color3.fromRGB(255, 70, 70)
+    label.TextStrokeTransparency = 0
+    label.TextScaled = true
+    label.Font = Enum.Font.GothamBold
+    label.Text = model.Name
+    label.Parent = billboard
+
+    entityESPObjects[model] = {
+        highlight = highlight,
+        billboard = billboard,
+        label = label,
+    }
+end
+
+local function scanEntityInstance(instance)
+    if instance:IsA("Model") then
+        createEntityESP(instance)
+    elseif instance:IsA("BasePart") or instance:IsA("Humanoid")
+        or instance.Name == "HumanoidRootPart" or instance.Name == "Entity"
+        or instance:GetAttribute("IsEntity") == true then
+        local model = instance:FindFirstAncestorOfClass("Model")
+        if model then
+            task.defer(function()
+                if states.entitiesESP and model.Parent then
+                    createEntityESP(model)
+                end
+            end)
+        end
+    end
+end
+
+local function setEntitiesESP(active)
+    states.entitiesESP = active
+
+    if entityESPAddedConnection then
+        entityESPAddedConnection:Disconnect()
+        entityESPAddedConnection = nil
+    end
+    if entityESPRemovingConnection then
+        entityESPRemovingConnection:Disconnect()
+        entityESPRemovingConnection = nil
+    end
+    if entityESPScanConnection then
+        entityESPScanConnection:Disconnect()
+        entityESPScanConnection = nil
+    end
+
+    if not active then
+        for model in pairs(entityESPObjects) do
+            removeEntityESP(model)
+        end
+        return
+    end
+
+    -- Scanner les entités déjà présentes.
+    for _, instance in ipairs(Workspace:GetDescendants()) do
+        if instance:IsA("Model") then
+            createEntityESP(instance)
+        end
+    end
+
+    -- Détecter les entités ajoutées après l'activation.
+    entityESPAddedConnection = Workspace.DescendantAdded:Connect(scanEntityInstance)
+
+    entityESPRemovingConnection = Workspace.DescendantRemoving:Connect(function(instance)
+        if instance:IsA("Model") then
+            removeEntityESP(instance)
+        end
+    end)
+
+    -- Mettre à jour les distances sans créer de connexion en double.
+    entityESPScanConnection = RunService.RenderStepped:Connect(function()
+        if not states.entitiesESP then return end
+
+        local root = getRoot()
+        for model, data in pairs(entityESPObjects) do
+            if not model.Parent then
+                removeEntityESP(model)
+            elseif root and data.billboard and data.billboard.Adornee
+                and data.billboard.Adornee:IsA("BasePart") then
+                local distance = (root.Position - data.billboard.Adornee.Position).Magnitude
+                data.label.Text = string.format("%s\n%d studs", model.Name, math.floor(distance))
+                data.billboard.Enabled = distance <= 10000
+            end
+        end
+    end)
+end
+
+
+addToggle("15. 🔴 ESP Entités", setEntitiesESP)
+
+-- Arrêt complet : désactive les effets connus, restaure les valeurs visuelles et détruit le GUI.
+local scriptClosed = false
+local function closeAdminPanelPermanently()
+    if scriptClosed then return end
+    scriptClosed = true
+
+    -- Désactive les boucles avant de détruire l'interface.
+    for key in pairs(states) do states[key] = false end
+    stopXRay()
+    setEntitiesESP(false)
+
+    for name, connection in pairs(connections) do
+        if connection then pcall(function() connection:Disconnect() end) end
+        connections[name] = nil
+    end
+    if xrayConnection then pcall(function() xrayConnection:Disconnect() end); xrayConnection = nil end
+
+    -- Supprime les marqueurs ESP des joueurs.
+    for _, instance in ipairs(Workspace:GetDescendants()) do
+        if instance.Name == "ESP_MARK" then pcall(function() instance:Destroy() end) end
+    end
+
+    -- Supprime les forces de vol créées par ce script.
+    if flyBG then pcall(function() flyBG:Destroy() end); flyBG = nil end
+    if flyBV then pcall(function() flyBV:Destroy() end); flyBV = nil end
+
+    -- Restaure les valeurs par défaut que ce panel modifie.
+    local character = player.Character
+    if character then
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then part.CanCollide = true end
+        end
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = 16
+            camera.CameraSubject = humanoid
+        end
+    end
+    pcall(function()
+        Lighting.Ambient = Color3.fromRGB(127, 127, 127)
+        Lighting.Brightness = 1
+        player.CameraMaxZoomDistance = 400
+        player.CameraMinZoomDistance = 0.5
+    end)
+
+    pcall(function() sound:Stop(); sound:Destroy() end)
+    activeDrag = nil
+    screenGui:Destroy()
+end
+
+confirmCloseBtn.MouseButton1Click:Connect(closeAdminPanelPermanently)
 
 -- --- NOTIFICATION DE LANCEMENT ---
 game:GetService("StarterGui"):SetCore("SendNotification", {
